@@ -1,0 +1,2 @@
+# snapmusicbot-
+MAGMA
