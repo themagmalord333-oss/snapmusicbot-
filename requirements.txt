@@ -1,6 +1,6 @@
-pyrogram==2.0.106
-tgcrypto
-flask
-requests
-typing-extensions
-pydantic<2.0.0
+instabot==0.117.0
+instaloader==4.9.6
+flask==2.3.3
+gunicorn==21.2.0
+requests==2.31.0
+python-dotenv==1.0.0
