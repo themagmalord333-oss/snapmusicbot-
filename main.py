@@ -1,123 +1,180 @@
+import instaloader
+from instabot import Bot
+import time
 import os
-import asyncio
-import random
-import requests
-from threading import Thread
-from flask import Flask
-from pyrogram import Client, filters
-from instagrapi import Client as IGClient
+import shutil
+import sys
+import logging
+from datetime import datetime
 
-# ==================== 🛑 LOOP CRASH FIX 🛑 ====================
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-# ==============================================================
+# Logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
-# ==================== CONFIGURATION ====================
-API_ID = 37314366
-API_HASH = "bd4c934697e7e91942ac911a5a287b46"
-BOT_TOKEN = "8583883682:AAGpFqdU9roiAqv1FUbxr-gHVXTWmbmfkA"
-
-# ==================== SERVER KEEP ALIVE ====================
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "🔥 Session ID Bot is Running! 🔥"
-
-def run_web():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
-# ==================== BOT SETUP ====================
-bot = Client("MagmaIG", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
-ig_sessions = {}
-is_spamming = {}
-
-SPAM_MESSAGES = [
-    "𝗧𝗘𝗥𝗜 𝗠𝗔𝗔 𝗞𝗜 𝗖𝗛𝗨𝗧 𝗠𝗘 𝗖𝗛𝗔𝗡𝗚𝗘𝗦 𝗖𝗢𝗠𝗠𝗜𝗧 𝗞𝗥𝗨𝗚𝗔 🤖🙏",
-    "𝗧𝗘𝗥𝗜 𝗠𝗨𝗠𝗠𝗬 𝗞𝗜 𝗖𝗛𝗨𝗧 𝗞𝗢 𝗢𝗡𝗟𝗜𝗡𝗘 𝗢𝗟𝗫 𝗣𝗘 𝗕𝗘𝗖𝗛𝗨𝗡𝗚𝗔 💸",
-    "𝗧𝗘𝗥𝗜 𝗦𝗛𝗔𝗞𝗔𝗟 𝗗𝗘𝗞𝗛 𝗞𝗘 𝗧𝗢 𝗦𝗨𝗔𝗥 𝗕𝗛𝗜 𝗨𝗟𝗧𝗜 𝗞𝗔𝗥 𝗗𝗘 🤮",
-    "𝗦𝗬𝗦𝗧𝗘𝗠 𝗣𝗘 𝗦𝗬𝗦𝗧𝗘𝗠 𝗕𝗜𝗧𝗛𝗔 𝗗𝗘𝗡𝗚𝗘 𝗧𝗘𝗥𝗜 𝗚𝗔𝗔𝗡𝗗 𝗠𝗘 🎛️"
-]
-
-# ==================== COMMANDS ====================
-@bot.on_message(filters.command("start"))
-async def start_cmd(c, m):
-    await m.reply(
-        "🔥 **IG SESSION SPAM BOT ONLINE!** 🔥\n\n"
-        "Ab Password ki zaroorat nahi.\n"
-        "Commands:\n"
-        "1️⃣ `/login session_id_here`\n"
-        "2️⃣ `/igspam target_username count`\n"
-        "3️⃣ `/stop`"
-    )
-
-@bot.on_message(filters.command("login"))
-async def login_cmd(c, m):
-    if len(m.command) < 2: 
-        return await m.reply("❌ Use: `/login <session_id>`")
-    
-    session_id = m.command[1]
-    msg = await m.reply("🔄 Session ID bypass se login ho raha hai...")
-    
-    try:
-        cl = IGClient()
-        # Session ID se direct login
-        cl.login_by_sessionid(session_id)
+class InstagramBot:
+    def __init__(self):
+        self.bot = Bot()
+        self.L = instaloader.Instaloader()
+        self.username = os.environ.get('INSTAGRAM_USERNAME', '')
+        self.password = os.environ.get('INSTAGRAM_PASSWORD', '')
+        self.target = os.environ.get('TARGET_USERNAME', '')
+        self.message = os.environ.get('MESSAGE', 'Hello!')
+        self.count = int(os.environ.get('MESSAGE_COUNT', '5'))
         
-        ig_sessions[m.from_user.id] = cl
-        await msg.edit("✅ **Login Successful (Bypassed Security)!**\nAb aap `/igspam` use kar sakte ho.")
-    except Exception as e:
-        await msg.edit(f"❌ Login Failed: {str(e)}")
-
-@bot.on_message(filters.command("igspam"))
-async def spam_cmd(c, m):
-    uid = m.from_user.id
-    if uid not in ig_sessions: return await m.reply("❌ Pehle `/login <session_id>` karo!")
+    def setup_session(self):
+        """Session setup using environment variables"""
+        try:
+            # Pehle session file check karo
+            session_file = f"{self.username}.session"
+            
+            if os.path.exists(session_file):
+                logging.info(f"✅ Session file found: {session_file}")
+                self.L.load_session_from_file(self.username)
+                self.bot.login(username=self.username, use_cookie=True)
+                return True
+            else:
+                logging.info("📝 Creating new session...")
+                return self.create_new_session()
+                
+        except Exception as e:
+            logging.error(f"❌ Session error: {e}")
+            return False
     
-    try: 
-        target = m.command[1]
-        count = int(m.command[2])
-    except: 
-        return await m.reply("❌ Use: `/igspam target_user 10`")
+    def create_new_session(self):
+        """Create new session using environment credentials"""
+        try:
+            if not self.password:
+                logging.error("❌ Password not found in environment variables")
+                return False
+                
+            # Instaloader login
+            self.L.login(self.username, self.password)
+            self.L.save_session_to_file()
+            logging.info(f"✅ Session saved: {self.username}.session")
+            
+            # Instabot login
+            self.bot.login(username=self.username, password=self.password)
+            logging.info("✅ Instabot login successful")
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"❌ Login failed: {e}")
+            return False
     
-    cl = ig_sessions[uid]
-    is_spamming[uid] = True
-    await m.reply(f"🚀 Attacking `{target}`...")
+    def send_bulk_messages(self):
+        """Send messages with error handling"""
+        try:
+            # Target user ID find karo
+            user_id = self.bot.get_user_id_from_username(self.target)
+            logging.info(f"✅ Target found: {self.target} (ID: {user_id})")
+            
+            logging.info(f"📤 Sending {self.count} messages to {self.target}...")
+            
+            for i in range(self.count):
+                try:
+                    self.bot.send_message(self.message, [user_id])
+                    logging.info(f"✓ Message {i+1}/{self.count} sent")
+                    
+                    # Smart delay
+                    if (i + 1) % 10 == 0:
+                        logging.info("⏸️ Taking 30 sec break...")
+                        time.sleep(30)
+                    else:
+                        time.sleep(2)
+                        
+                except Exception as e:
+                    logging.error(f"❌ Failed to send message {i+1}: {e}")
+                    time.sleep(5)
+                    continue
+            
+            logging.info(f"✅ All {self.count} messages sent successfully!")
+            return True
+            
+        except Exception as e:
+            logging.error(f"❌ Fatal error: {e}")
+            return False
     
-    try:
-        tid = cl.user_id_from_username(target)
-        for i in range(count):
-            if not is_spamming.get(uid): break
-            cl.direct_send(random.choice(SPAM_MESSAGES), [tid])
-            await asyncio.sleep(8)
-        await m.reply("✅ Target Destroyed!")
-    except Exception as e:
-        await m.reply(f"❌ Error: {e}")
-    finally:
-        is_spamming[uid] = False
+    def run_once(self):
+        """Run bot once and exit"""
+        logging.info("="*50)
+        logging.info("🔥 INSTAGRAM BOT STARTING 🔥")
+        logging.info("="*50)
+        
+        if not self.username:
+            logging.error("❌ INSTAGRAM_USERNAME not set in environment")
+            return False
+            
+        logging.info(f"👤 Logging in as: {self.username}")
+        
+        if self.setup_session():
+            if self.target and self.message:
+                success = self.send_bulk_messages()
+                logging.info(f"📊 Final status: {'✅ Success' if success else '❌ Failed'}")
+                return success
+            else:
+                logging.warning("⚠️ TARGET_USERNAME or MESSAGE not set")
+                return True  # Not a failure, just no messages
+        else:
+            logging.error("❌ Login failed")
+            return False
 
-@bot.on_message(filters.command("stop"))
-async def stop_cmd(c, m):
-    is_spamming[m.from_user.id] = False
-    await m.reply("🛑 Stopped.")
+def keep_alive():
+    """Keep the bot running (for web service)"""
+    from flask import Flask, jsonify
+    import threading
+    
+    app = Flask(__name__)
+    
+    @app.route('/')
+    def home():
+        return jsonify({
+            'status': 'alive',
+            'bot': 'running',
+            'time': datetime.now().isoformat()
+        })
+    
+    @app.route('/health')
+    def health():
+        return jsonify({'status': 'healthy'})
+    
+    # Run Flask in a separate thread
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))).start()
+    logging.info("🌐 Web server started for keep-alive")
 
-# ==================== EXECUTION ====================
+def main():
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=['once', 'web'], default='web')
+    args = parser.parse_args()
+    
+    bot = InstagramBot()
+    
+    if args.mode == 'web':
+        # Web mode - keep running
+        keep_alive()
+        
+        # Run bot once immediately
+        bot.run_once()
+        
+        # Schedule next run? (optional)
+        # For now, just keep web server running
+        while True:
+            time.sleep(3600)  # Sleep for 1 hour
+            # Run again? Uncomment below:
+            # bot.run_once()
+            
+    else:
+        # Once mode - run and exit
+        success = bot.run_once()
+        sys.exit(0 if success else 1)
+
 if __name__ == "__main__":
-    # Webhook cleanup (Just in case)
-    try:
-        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook")
-    except: pass
-
-    # Server Start
-    t = Thread(target=run_web)
-    t.daemon = True
-    t.start()
-    
-    # Bot Start
-    print("🚀 Session Bot Starting...")
-    bot.run()
+    main()
