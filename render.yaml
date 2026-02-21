@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: instagram-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn bot:app
+    envVars:
+      - key: INSTAGRAM_USERNAME
+        sync: false
+      - key: INSTAGRAM_PASSWORD
+        sync: false
+      - key: TARGET_USERNAME
+        sync: false
+      - key: MESSAGE
+        value: "Hello! This is an automated message."
+      - key: MESSAGE_COUNT
+        value: "5"
+      - key: PYTHON_VERSION
+        value: 3.9.0
