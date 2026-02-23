@@ -1,6 +1,4 @@
 pyrogram
-tgcrypto
 pytgcalls
+tgcrypto
 flask
-pydantic<2.0.0
-typing-extensions
