@@ -1,4 +1,6 @@
-pyrogram
-py-tgcalls
-tgcrypto
-flask
+python-telegram-bot
+Flask
+requests
+python-dotenv
+aiohttp
+gunicorn
