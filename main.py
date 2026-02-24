@@ -10,14 +10,13 @@ import json
 import asyncio
 import logging
 import datetime
-import threading
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from flask import Flask, jsonify
 import aiohttp
+from aiohttp import web
 from dotenv import load_dotenv
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -39,6 +38,7 @@ load_dotenv()
 
 class Config:
     """Application configuration"""
+    # Fallback token if .env is missing. Make sure your Render Env Var is set!
     BOT_TOKEN = os.getenv('8461918613:AAG0vYdmFl-Sag31h8NV0prt95rO0dXDMNw', 'YOUR_BOT_TOKEN_HERE') 
     OWNER_ID = int(os.getenv('7727470646', '0'))
     ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
@@ -88,23 +88,6 @@ class InstagramProfile:
     profile_pic_url: str = ""
     status: AccountStatus = AccountStatus.UNKNOWN
     last_checked: Optional[str] = None
-
-@dataclass
-class MonitoredUser:
-    """User data structure"""
-    user_id: int
-    username: str = ""
-    role: UserRole = UserRole.USER
-    subscription_expiry: Optional[str] = None
-    watch_list: List[str] = None
-    ban_list: List[str] = None
-    created_at: str = ""
-
-    def __post_init__(self):
-        if self.watch_list is None:
-            self.watch_list = []
-        if self.ban_list is None:
-            self.ban_list = []
 
 # ============================================================================
 # DATABASE MANAGER
@@ -222,22 +205,6 @@ class DatabaseManager:
         except:
             return False
 
-    def extend_subscription(self, user_id: int, days: int) -> bool:
-        user = self.get_user(user_id)
-        if not user: return False
-        now = datetime.datetime.now()
-        if user.get('subscription_expiry'):
-            try:
-                current = datetime.datetime.fromisoformat(user['subscription_expiry'])
-                new_expiry = (current if current > now else now) + datetime.timedelta(days=days)
-            except:
-                new_expiry = now + datetime.timedelta(days=days)
-        else:
-            new_expiry = now + datetime.timedelta(days=days)
-        user['subscription_expiry'] = new_expiry.isoformat()
-        self.update_user(user_id, **user)
-        return True
-
     def get_all_users(self) -> List[Dict]:
         return list(self.data['users'].values())
 
@@ -257,7 +224,7 @@ class InstagramMonitor:
         try:
             if not self.session:
                 self.session = aiohttp.ClientSession(headers=Config.INSTA_HEADERS)
-            await asyncio.sleep(1) # Simulating API
+            await asyncio.sleep(1) # Simulating API delay
             username_lower = username.lower()
             if 'banned' in username_lower or 'suspended' in username_lower:
                 return InstagramProfile(username=username, status=AccountStatus.BANNED)
@@ -271,6 +238,7 @@ class InstagramMonitor:
             return InstagramProfile(username=username, status=AccountStatus.UNKNOWN)
 
     async def check_usernames(self):
+        logging.info("Instagram monitoring loop started.")
         while self.is_running:
             try:
                 all_usernames = set()
@@ -320,19 +288,6 @@ class InstagramMonitor:
             logging.error(f"Alert failed to {user_id}: {e}")
 
 # ============================================================================
-# FLASK KEEP-ALIVE SERVER
-# ============================================================================
-
-flask_app = Flask(__name__)
-
-@flask_app.route('/')
-def home():
-    return jsonify({'status': 'running', 'service': 'Instagram Monitor Bot'})
-
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8080)))
-
-# ============================================================================
 # TELEGRAM BOT HANDLERS
 # ============================================================================
 
@@ -357,7 +312,6 @@ class BotHandlers:
         if not self.db.get_user(user.id):
             self.db.create_user(user.id, user.username)
         
-        # Auto-grant owner role based on config
         if user.id == Config.OWNER_ID:
             self.db.update_user(user.id, role='owner')
             
@@ -368,7 +322,7 @@ class BotHandlers:
 
     async def watch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        has_access, msg = self.check_access(user_id)
+        has_access, msg = self._check_access(user_id)
         if not has_access:
             await update.message.reply_text(msg)
             return
@@ -404,14 +358,32 @@ class BotHandlers:
             msg += f"• @{user}\n"
         await update.message.reply_text(msg, parse_mode="Markdown")
 
+# ============================================================================
+# WEB SERVER & INITIALIZATION (RENDER FIX)
+# ============================================================================
 
-# ============================================================================
-# MAIN EXECUTION
-# ============================================================================
+async def web_health_check(request):
+    """Dummy endpoint to satisfy Render's port binding requirement"""
+    return web.json_response({"status": "running", "service": "Insta Monitor Bot"})
+
+async def start_web_server():
+    """Starts the aiohttp web server"""
+    app = web.Application()
+    app.add_routes([web.get('/', web_health_check), web.get('/health', web_health_check)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logging.info(f"Keep-alive web server started on port {port}")
 
 async def post_init(application: Application):
-    """Start background tasks when the bot starts"""
-    # Create the monitor instance attached to the app context
+    """Start background tasks (Monitor + Web Server) when bot starts"""
+    # 1. Start Web Server
+    await start_web_server()
+    
+    # 2. Start Instagram Monitor Loop
     monitor = application.bot_data['monitor']
     asyncio.create_task(monitor.check_usernames())
 
@@ -419,30 +391,24 @@ def main():
     # 1. Initialize Logging
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-    # 2. Initialize Core Components
+    # 2. Initialize Database
     db = DatabaseManager()
     
-    # 3. Setup Bot Application
+    # 3. Setup Bot Application with post_init hook
     bot_app = Application.builder().token(Config.BOT_TOKEN).post_init(post_init).build()
-    monitor = InstagramMonitor(db, bot_app)
     
-    # Store monitor in bot_data for access in post_init
+    # 4. Attach Monitor
+    monitor = InstagramMonitor(db, bot_app)
     bot_app.bot_data['monitor'] = monitor 
     
-    # 4. Setup Handlers
+    # 5. Setup Handlers
     handlers = BotHandlers(db, monitor)
     bot_app.add_handler(CommandHandler("start", handlers.start))
     bot_app.add_handler(CommandHandler("watch", handlers.watch))
     bot_app.add_handler(CommandHandler("status", handlers.status))
     
-    # 5. Start Flask keep-alive server in background thread
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    logging.info("Flask keep-alive server started.")
-    
-    # 6. Run Telegram Bot (Blocking)
-    logging.info("Starting Telegram bot polling...")
+    # 6. Run Everything! (This handles the async loops cleanly)
+    logging.info("Starting bot...")
     bot_app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
