@@ -19,14 +19,11 @@ import aiohttp
 from aiohttp import web
 from dotenv import load_dotenv
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    MessageHandler,
-    filters
+    ContextTypes
 )
 
 # Load environment variables
@@ -38,25 +35,21 @@ load_dotenv()
 
 class Config:
     """Application configuration"""
-    # Fallback token if .env is missing. Make sure your Render Env Var is set!
     BOT_TOKEN = os.getenv('8461918613:AAG0vYdmFl-Sag31h8NV0prt95rO0dXDMNw', 'YOUR_BOT_TOKEN_HERE') 
-    OWNER_ID = int(os.getenv('7727470646', '0'))
+    OWNER_ID = int(os.getenv('7958364334', '0'))
     ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
     if OWNER_ID and OWNER_ID not in ADMIN_IDS:
         ADMIN_IDS.append(OWNER_ID)
 
     DATA_FILE = 'data.json'
-    CHECK_INTERVAL = 300  # 5 minutes in seconds
+    CHECK_INTERVAL = 300  # 5 minutes
     CONFIRMATION_THRESHOLD = 3
     MAX_USERNAMES_PER_USER = 20
 
-    # Instagram API simulation (replace with actual API)
-    INSTA_API_URL = "https://i.instagram.com/api/v1/users/web_profile_info/?username={}"
     INSTA_HEADERS = {
         'User-Agent': 'Instagram 219.0.0.12.117 Android',
         'Accept': '*/*',
         'Accept-Language': 'en-US',
-        'Accept-Encoding': 'gzip, deflate',
     }
 
 # ============================================================================
@@ -72,22 +65,13 @@ class AccountStatus(Enum):
     ACTIVE = "active"
     BANNED = "banned"
     UNKNOWN = "unknown"
-    CHECKING = "checking"
 
 @dataclass
 class InstagramProfile:
-    """Instagram profile data"""
     username: str
     full_name: str = "N/A"
     followers: int = 0
-    following: int = 0
-    posts: int = 0
-    is_private: bool = False
-    is_verified: bool = False
-    biography: str = ""
-    profile_pic_url: str = ""
     status: AccountStatus = AccountStatus.UNKNOWN
-    last_checked: Optional[str] = None
 
 # ============================================================================
 # DATABASE MANAGER
@@ -95,7 +79,6 @@ class InstagramProfile:
 
 class DatabaseManager:
     """Persistent JSON database manager"""
-
     def __init__(self, file_path: str = Config.DATA_FILE):
         self.file_path = file_path
         self.data = self._load_data()
@@ -106,14 +89,14 @@ class DatabaseManager:
                 with open(self.file_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except:
-                return self._get_default_structure()
+                pass
         return self._get_default_structure()
 
     def _get_default_structure(self) -> Dict:
         return {
             'users': {}, 'watch_list': {}, 'ban_list': {},
-            'confirmation_counters': {}, 'username_cache': {},
-            'stats': {'total_checks': 0, 'alerts_sent': 0, 'created_at': datetime.datetime.now().isoformat()}
+            'confirmation_counters': {}, 
+            'stats': {'total_checks': 0, 'alerts_sent': 0}
         }
 
     def save(self):
@@ -126,21 +109,18 @@ class DatabaseManager:
     def create_user(self, user_id: int, username: str = "") -> Dict:
         user = {
             'user_id': user_id, 'username': username, 'role': 'user',
-            'subscription_expiry': None, 'watch_list': [], 'ban_list': [],
-            'created_at': datetime.datetime.now().isoformat()
+            'subscription_expiry': None, 'watch_list': [], 'ban_list': []
         }
         self.data['users'][str(user_id)] = user
         self.save()
         return user
 
-    def update_user(self, user_id: int, **kwargs) -> Optional[Dict]:
+    def update_user(self, user_id: int, **kwargs):
         user = self.get_user(user_id)
         if user:
             user.update(kwargs)
             self.data['users'][str(user_id)] = user
             self.save()
-            return user
-        return None
 
     def add_to_watch(self, user_id: int, username: str) -> bool:
         user = self.get_user(user_id)
@@ -150,103 +130,71 @@ class DatabaseManager:
             user['watch_list'].append(username)
             self.update_user(user_id, **user)
             if username not in self.data['confirmation_counters']:
-                self.data['confirmation_counters'][username] = {'status': 'unknown', 'count': 0, 'last_check': None}
+                self.data['confirmation_counters'][username] = {'status': 'unknown', 'count': 0}
             self.save()
             return True
         return False
 
-    def remove_from_watch(self, user_id: int, username: str) -> bool:
+    def remove_from_watch(self, user_id: int, username: str):
         user = self.get_user(user_id)
         if user and username in user['watch_list']:
             user['watch_list'].remove(username)
             self.update_user(user_id, **user)
-            return True
-        return False
 
-    def add_to_ban(self, user_id: int, username: str) -> bool:
+    def add_to_ban(self, user_id: int, username: str):
         user = self.get_user(user_id)
-        if not user: return False
-        username = username.lower().strip('@')
-        if username not in user['ban_list']:
+        if user and username not in user['ban_list']:
             user['ban_list'].append(username)
             self.update_user(user_id, **user)
-            self.save()
-        return True
-
-    def remove_from_ban(self, user_id: int, username: str) -> bool:
-        user = self.get_user(user_id)
-        if user and username in user['ban_list']:
-            user['ban_list'].remove(username)
-            self.update_user(user_id, **user)
-            return True
-        return False
-
-    def update_confirmation(self, username: str, status: str, count: int) -> Dict:
-        self.data['confirmation_counters'][username] = {
-            'status': status, 'count': count, 'last_check': datetime.datetime.now().isoformat()
-        }
-        self.save()
-        return self.data['confirmation_counters'][username]
 
     def get_confirmation(self, username: str) -> Dict:
-        return self.data['confirmation_counters'].get(username, {'status': 'unknown', 'count': 0, 'last_check': None})
+        return self.data['confirmation_counters'].get(username, {'status': 'unknown', 'count': 0})
+
+    def update_confirmation(self, username: str, status: str, count: int):
+        self.data['confirmation_counters'][username] = {'status': status, 'count': count}
+        self.save()
 
     def reset_confirmation(self, username: str):
         self.update_confirmation(username, 'unknown', 0)
 
-    def is_subscription_active(self, user_id: int) -> bool:
-        user = self.get_user(user_id)
-        if not user: return False
-        if user['role'] in ['owner', 'admin']: return True
-        expiry = user.get('subscription_expiry')
-        if not expiry: return False
-        try:
-            return datetime.datetime.fromisoformat(expiry) > datetime.datetime.now()
-        except:
-            return False
-
     def get_all_users(self) -> List[Dict]:
         return list(self.data['users'].values())
-
 
 # ============================================================================
 # INSTAGRAM MONITORING ENGINE
 # ============================================================================
 
 class InstagramMonitor:
-    def __init__(self, db: DatabaseManager, bot_app: Application):
+    def __init__(self, db: DatabaseManager, bot):
         self.db = db
-        self.bot = bot_app.bot
-        self.is_running = True
+        self.bot = bot
         self.session = None
 
     async def get_profile(self, username: str) -> InstagramProfile:
         try:
             if not self.session:
                 self.session = aiohttp.ClientSession(headers=Config.INSTA_HEADERS)
-            await asyncio.sleep(1) # Simulating API delay
+            await asyncio.sleep(1) # Simulated API Delay
             username_lower = username.lower()
             if 'banned' in username_lower or 'suspended' in username_lower:
                 return InstagramProfile(username=username, status=AccountStatus.BANNED)
-            return InstagramProfile(
-                username=username, full_name="John Doe", followers=1000,
-                following=500, posts=50, is_private=False, is_verified=False,
-                biography=f"User {username}", status=AccountStatus.ACTIVE
-            )
+            return InstagramProfile(username=username, status=AccountStatus.ACTIVE)
         except Exception as e:
-            logging.error(f"Error fetching profile {username}: {e}")
+            logging.error(f"Error fetching {username}: {e}")
             return InstagramProfile(username=username, status=AccountStatus.UNKNOWN)
 
     async def check_usernames(self):
-        logging.info("Instagram monitoring loop started.")
-        while self.is_running:
+        logging.info("Monitor loop started.")
+        while True:
             try:
                 all_usernames = set()
                 for user in self.db.get_all_users():
                     all_usernames.update(user.get('watch_list', []))
+                
                 for username in all_usernames:
                     await self.check_single_username(username)
                     await asyncio.sleep(2)
+                
                 self.db.data['stats']['total_checks'] += len(all_usernames)
                 self.db.save()
             except Exception as e:
@@ -255,12 +203,10 @@ class InstagramMonitor:
 
     async def check_single_username(self, username: str):
         profile = await self.get_profile(username)
-        confirmation = self.db.get_confirmation(username)
+        conf = self.db.get_confirmation(username)
         current_status = profile.status.value
-        previous_status = confirmation['status']
-        current_count = confirmation['count']
-
-        new_count = current_count + 1 if (current_status == previous_status and current_status != 'unknown') else (1 if current_status != 'unknown' else 0)
+        
+        new_count = conf['count'] + 1 if (current_status == conf['status'] and current_status != 'unknown') else 1
         self.db.update_confirmation(username, current_status, new_count)
 
         if new_count >= Config.CONFIRMATION_THRESHOLD:
@@ -275,141 +221,105 @@ class InstagramMonitor:
                 self.db.add_to_ban(user_id, username)
                 await self.send_alert(user_id, profile, "🚫 **ACCOUNT BANNED**")
             elif new_status == 'active' and username in user.get('ban_list', []):
-                self.db.remove_from_ban(user_id, username)
-                self.db.add_to_watch(user_id, username)
+                # Remove from ban, but don't auto-watch again unless they want to.
+                user['ban_list'].remove(username)
+                self.db.update_user(user_id, **user)
                 await self.send_alert(user_id, profile, "✅ **ACCOUNT UNBANNED**")
 
     async def send_alert(self, user_id: int, profile: InstagramProfile, header: str):
-        text = f"{header}\n\n👤 **Name:** {profile.full_name}\n📧 **Username:** @{profile.username}\n👥 **Followers:** {profile.followers}\n🕐 Last Checked: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        text = f"{header}\n\n📧 **Username:** @{profile.username}\n🕐 Last Checked: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         try:
             await self.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
-            self.db.data['stats']['alerts_sent'] += 1
         except Exception as e:
-            logging.error(f"Alert failed to {user_id}: {e}")
+            logging.error(f"Alert failed: {e}")
 
 # ============================================================================
-# TELEGRAM BOT HANDLERS
+# BOT HANDLERS
 # ============================================================================
 
 class BotHandlers:
-    def __init__(self, db: DatabaseManager, monitor: InstagramMonitor):
+    def __init__(self, db: DatabaseManager):
         self.db = db
-        self.monitor = monitor
-
-    def _check_access(self, user_id: int, required_role: str = 'user') -> Tuple[bool, str]:
-        user = self.db.get_user(user_id)
-        if not user:
-            return False, "❌ You are not registered. Use /start to begin."
-        if user['role'] == 'owner': return True, ""
-        if user['role'] == 'admin' and required_role in ['user', 'admin']: return True, ""
-        if required_role == 'admin': return False, "❌ Admin access required."
-        if not self.db.is_subscription_active(user_id):
-            return False, "❌ Your subscription has expired. Contact admin."
-        return True, ""
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if not self.db.get_user(user.id):
             self.db.create_user(user.id, user.username)
-        
         if user.id == Config.OWNER_ID:
             self.db.update_user(user.id, role='owner')
             
-        await update.message.reply_text(
-            f"👋 Welcome {user.first_name} to the Enterprise Instagram Monitor!\n\n"
-            "Use /watch <username> to start tracking an account."
-        )
+        await update.message.reply_text(f"👋 Welcome {user.first_name}!\nUse /watch <username> to track an account.")
 
     async def watch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        has_access, msg = self._check_access(user_id)
-        if not has_access:
-            await update.message.reply_text(msg)
-            return
-
         if not context.args:
             await update.message.reply_text("⚠️ Usage: `/watch <username>`", parse_mode="Markdown")
             return
             
         username = context.args[0].replace('@', '')
-        user_data = self.db.get_user(user_id)
-        
-        if len(user_data.get('watch_list', [])) >= Config.MAX_USERNAMES_PER_USER and user_data['role'] not in ['admin', 'owner']:
-            await update.message.reply_text("❌ You have reached your watch limit.")
-            return
-
         if self.db.add_to_watch(user_id, username):
             await update.message.reply_text(f"✅ Now watching: **@{username}**", parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"⚠️ You are already watching **@{username}**", parse_mode="Markdown")
+            await update.message.reply_text(f"⚠️ Already watching **@{username}**", parse_mode="Markdown")
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        user_data = self.db.get_user(user_id)
-        if not user_data: return
-
-        watch_list = user_data.get('watch_list', [])
+        user_data = self.db.get_user(update.effective_user.id)
+        watch_list = user_data.get('watch_list', []) if user_data else []
+        
         if not watch_list:
             await update.message.reply_text("📭 Your watchlist is empty.")
             return
-
-        msg = "📊 **Your Watchlist Status:**\n\n"
-        for user in watch_list:
-            msg += f"• @{user}\n"
+            
+        msg = "📊 **Your Watchlist:**\n\n" + "\n".join([f"• @{u}" for u in watch_list])
         await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ============================================================================
-# WEB SERVER & INITIALIZATION (RENDER FIX)
+# MAIN ASYNC EXECUTION (RENDER COMPATIBLE)
 # ============================================================================
 
-async def web_health_check(request):
-    """Dummy endpoint to satisfy Render's port binding requirement"""
-    return web.json_response({"status": "running", "service": "Insta Monitor Bot"})
-
-async def start_web_server():
-    """Starts the aiohttp web server"""
+async def start_dummy_server():
+    """Starts a minimal aiohttp server to satisfy Render's Port Binding"""
     app = web.Application()
-    app.add_routes([web.get('/', web_health_check), web.get('/health', web_health_check)])
+    app.add_routes([web.get('/', lambda r: web.json_response({"status": "running"}))])
     runner = web.AppRunner(app)
     await runner.setup()
-    
     port = int(os.environ.get('PORT', 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logging.info(f"Keep-alive web server started on port {port}")
+    logging.info(f"Dummy Web Server started on port {port}")
 
-async def post_init(application: Application):
-    """Start background tasks (Monitor + Web Server) when bot starts"""
-    # 1. Start Web Server
-    await start_web_server()
+async def main_loop():
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
     
-    # 2. Start Instagram Monitor Loop
-    monitor = application.bot_data['monitor']
+    # 1. Start Dummy Server for Render
+    await start_dummy_server()
+
+    # 2. Init Core Systems
+    db = DatabaseManager()
+    application = Application.builder().token(Config.BOT_TOKEN).build()
+    monitor = InstagramMonitor(db, application.bot)
+    handlers = BotHandlers(db)
+
+    # 3. Add Commands
+    application.add_handler(CommandHandler("start", handlers.start))
+    application.add_handler(CommandHandler("watch", handlers.watch))
+    application.add_handler(CommandHandler("status", handlers.status))
+
+    # 4. Start Bot Manually (Bypassing .run_polling bug)
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    logging.info("Bot is polling...")
+
+    # 5. Start Instagram Monitor Loop in Background
     asyncio.create_task(monitor.check_usernames())
 
-def main():
-    # 1. Initialize Logging
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-    # 2. Initialize Database
-    db = DatabaseManager()
-    
-    # 3. Setup Bot Application with post_init hook
-    bot_app = Application.builder().token(Config.BOT_TOKEN).post_init(post_init).build()
-    
-    # 4. Attach Monitor
-    monitor = InstagramMonitor(db, bot_app)
-    bot_app.bot_data['monitor'] = monitor 
-    
-    # 5. Setup Handlers
-    handlers = BotHandlers(db, monitor)
-    bot_app.add_handler(CommandHandler("start", handlers.start))
-    bot_app.add_handler(CommandHandler("watch", handlers.watch))
-    bot_app.add_handler(CommandHandler("status", handlers.status))
-    
-    # 6. Run Everything! (This handles the async loops cleanly)
-    logging.info("Starting bot...")
-    bot_app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # 6. Keep the script alive forever
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    main()
+    # Standard boilerplate for running an asyncio program
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        pass
