@@ -35,7 +35,7 @@ load_dotenv()
 
 class Config:
     """Application configuration"""
-    BOT_TOKEN = os.getenv('8461918613:AAG0vYdmFl-Sag31h8NV0prt95rO0dXDMNw', 'YOUR_BOT_TOKEN_HERE') 
+    BOT_TOKEN = os.getenv('8461918613:AAG0vYdmFl-Sag31h8NV0prt95rO0dXDMNw', '8461918613:AAG0vYdmFl-Sag31h8NV0prt95rO0dXDMNw') 
     OWNER_ID = int(os.getenv('7958364334', '0'))
     ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
     if OWNER_ID and OWNER_ID not in ADMIN_IDS:
