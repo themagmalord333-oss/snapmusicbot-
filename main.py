@@ -1,158 +1,124 @@
 import os
+import json
+import base64
 import time
 import threading
 import logging
-from pathlib import Path
+import requests
 from flask import Flask, jsonify
 from instagrapi import Client
 
-# 🔥 Detailed logging setup
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Environment variables
-USERNAME = os.environ.get('magmaxrich')
+USERNAME = os.environ.get('IG_USERNAME', 'magmaxrich')
 PASSWORD = os.environ.get('9113380244')
-REPLY_MSG = os.environ.get('REPLY_MESSAGE', 'धन्यवाद! 💖')
+SESSION_ID = os.environ.get('IG_SESSION_ID', '52659413459%3A8GvKhj070iUqIQ%3A21%3AAYjEhhY2ZCJyKlZA-s937zNTRHtbNHqstCGhDG9dNQ')
 PORT = int(os.environ.get('PORT', 10000))
 
-# Session file path
-SESSION_FILE = Path(f"session_{USERNAME}.json")
-
-# Flask app
 app = Flask(__name__)
 
 class InstagramBot:
     def __init__(self):
         self.cl = Client()
-        self.cl.delay_range = [1, 3]
         self.logged_in = False
         self.user_id = None
         
-    def login(self):
-        """Login with session"""
+    def login_with_session_id(self):
+        """Login using raw session ID"""
         try:
-            # Try to load existing session
-            if SESSION_FILE.exists():
-                logger.info(f"📂 Loading session from {SESSION_FILE}")
-                self.cl.load_settings(SESSION_FILE)
-                self.cl.login(USERNAME, PASSWORD)
-                logger.info("✅ Session loaded successfully!")
-            else:
-                logger.info("🔑 No session found. First time login...")
-                self.cl.login(USERNAME, PASSWORD)
-                # Save session
-                self.cl.dump_settings(SESSION_FILE)
-                logger.info(f"✅ Login successful! Session saved to {SESSION_FILE}")
+            logger.info("🔑 Trying login with session ID...")
             
+            # Create session with cookie
+            session = requests.Session()
+            session.cookies.set("sessionid", SESSION_ID, domain=".instagram.com")
+            
+            # Get cookies dict
+            cookies = session.cookies.get_dict()
+            
+            # Create settings for instagrapi
+            settings = {
+                "cookies": cookies,
+                "user_agent": "Instagram 269.0.0.18.121 Android (28/9; 420dpi; 1080x1920; samsung; SM-G965F; star2qlte; qcom; en_US; 269.0.0.18.121)",
+                "device_settings": {
+                    "app_version": "269.0.0.18.121",
+                    "android_version": 28,
+                    "android_release": "9.0",
+                    "manufacturer": "samsung",
+                    "device": "star2qlte",
+                    "model": "SM-G965F",
+                    "dpi": "420dpi",
+                    "resolution": "1080x1920",
+                    "chipset": "qcom"
+                }
+            }
+            
+            # Load settings
+            self.cl.set_settings(settings)
+            
+            # Verify by getting user_id
+            self.user_id = self.cl.user_id_from_username(USERNAME)
             self.logged_in = True
-            self.user_id = self.cl.user_id
-            logger.info(f"👤 Logged in as: {USERNAME} (ID: {self.user_id})")
+            logger.info(f"✅ Login successful! User ID: {self.user_id}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Login failed: {e}")
+            logger.error(f"❌ Session ID login failed: {e}")
             return False
     
-    def check_messages(self):
-        """Check for .love messages"""
-        if not self.logged_in:
-            logger.warning("⚠️ Not logged in, skipping message check")
-            return
-        
+    def login_normal(self):
+        """Normal login fallback"""
         try:
-            logger.debug("Checking for new messages...")
-            threads = self.cl.direct_threads(amount=5)
-            
-            for thread in threads:
-                messages = self.cl.direct_messages(thread.id, amount=1)
-                
-                if messages:
-                    msg = messages[0]
-                    logger.debug(f"Message from {msg.user_id}: {msg.text}")
-                    
-                    # Check if it's .love and not from self
-                    if (msg.text and 
-                        msg.text.strip().lower() == '.love' and 
-                        msg.user_id != self.user_id):
-                        
-                        logger.info(f"💝 .love received from user {msg.user_id}!")
-                        
-                        # Send reply
-                        self.cl.direct_send(REPLY_MSG, [msg.user_id])
-                        logger.info(f"✅ Reply sent: {REPLY_MSG}")
-                        
-                        # Mark as seen
-                        self.cl.direct_thread_seen(thread.id, msg.id)
-                        
+            logger.info("🔑 Trying normal login...")
+            self.cl.login(USERNAME, PASSWORD)
+            self.logged_in = True
+            self.user_id = self.cl.user_id
+            logger.info(f"✅ Normal login successful! User ID: {self.user_id}")
+            return True
         except Exception as e:
-            logger.error(f"Error checking messages: {e}")
+            logger.error(f"❌ Normal login failed: {e}")
+            return False
+    
+    def login(self):
+        """Try session ID first, then normal login"""
+        if SESSION_ID and self.login_with_session_id():
+            return True
+        return self.login_normal()
+    
+    def check_messages(self):
+        if not self.logged_in:
+            return
+        try:
+            threads = self.cl.direct_threads(amount=5)
+            for thread in threads:
+                msgs = self.cl.direct_messages(thread.id, amount=1)
+                if msgs:
+                    msg = msgs[0]
+                    if msg.text and msg.text.strip().lower() == '.love' and msg.user_id != self.user_id:
+                        logger.info(f"💝 .love from {msg.user_id}")
+                        self.cl.direct_send("धन्यवाद! 💖", [msg.user_id])
+        except Exception as e:
+            logger.error(f"Error: {e}")
     
     def run(self):
-        """Main loop"""
-        logger.info("🤖 Bot starting...")
-        
         if not self.login():
-            logger.error("❌ Could not login. Bot will retry in 60 seconds...")
-            time.sleep(60)
+            logger.error("Login failed")
             return
-        
-        logger.info("👂 Bot is now listening for .love messages...")
-        logger.info(f"📝 Reply message: {REPLY_MSG}")
-        
         while True:
-            try:
-                self.check_messages()
-                time.sleep(5)  # Check every 5 seconds
-            except KeyboardInterrupt:
-                logger.info("👋 Bot stopped by user")
-                break
-            except Exception as e:
-                logger.error(f"Unexpected error: {e}")
-                time.sleep(30)
+            self.check_messages()
+            time.sleep(5)
 
-# Create bot instance
 bot = InstagramBot()
+threading.Thread(target=bot.run, daemon=True).start()
 
-# Flask routes
 @app.route('/')
 def home():
     return jsonify({
         'status': 'running',
-        'bot': 'Instagram Bot',
         'user': USERNAME,
         'logged_in': bot.logged_in,
-        'user_id': bot.user_id,
-        'session_file_exists': SESSION_FILE.exists()
+        'user_id': bot.user_id
     })
 
-@app.route('/health')
-def health():
-    return jsonify({'status': 'healthy'}), 200
-
-@app.route('/debug')
-def debug():
-    """Debug endpoint to check bot status"""
-    return jsonify({
-        'username': USERNAME,
-        'logged_in': bot.logged_in,
-        'user_id': bot.user_id,
-        'session_file': str(SESSION_FILE),
-        'session_exists': SESSION_FILE.exists(),
-        'session_size': SESSION_FILE.stat().st_size if SESSION_FILE.exists() else 0
-    })
-
-# Start bot in background thread
-def start_bot():
-    bot.run()
-
-thread = threading.Thread(target=start_bot, daemon=True)
-thread.start()
-logger.info("🚀 Bot thread started")
-
-# Run Flask app
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    app.run(host='0.0.0.0', port=PORT)
