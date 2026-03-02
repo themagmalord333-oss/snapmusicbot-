@@ -17,9 +17,9 @@ def run_flask():
 # --- Instagram Bot Logic ---
 def run_bot():
     cl = Client()
-    USERNAME = "YOUR_INSTAGRAM_USERNAME"
-    PASSWORD = "YOUR_INSTAGRAM_PASSWORD"
-    SESSION_FILE = "session.json"
+    USERNAME = "magmaxrich"
+    PASSWORD = "9113380244"
+    SESSION_FILE = "52659413459%3A8GvKhj070iUqIQ%3A21%3AAYjEhhY2ZCJyKlZA-s937zNTRHtbNHqstCGhDG9dNQ"
 
     # Login Logic
     try:
