@@ -4,84 +4,61 @@ import threading
 from flask import Flask
 from instagrapi import Client
 
-# --- Flask Web Server (Render ke liye zaroori) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is Running! Render is keeping me alive."
+    return "Bot is Running!"
 
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-# --- Main Instagram Bot Logic ---
 def run_bot():
     cl = Client()
-    
-    # ⚠️ APNI DETAILS YAHAN DAALEIN ⚠️
+    # ⚠️ DETAILS DAALEIN
     USERNAME = "magmaxrich"
     PASSWORD = "9113380244"
-    SESSION_FILE = "52659413459%3A8GvKhj070iUqIQ%3A21%3AAYjEhhY2ZCJyKlZA-s937zNTRHtbNHqstCGhDG9dNQ"
     
-    # 📝 APNA CUSTOM MESSAGE YAHAN SET KAREIN 📝
-    # Pro Tip: Is message ke andar '.love' word mat likhna, warna bot baar-baar reply karta rahega (infinite loop).
-    CUSTOM_REPLY = "❤️ Ye mera automated response hai. Swagat hai aapka! ❤️"
-
-    print("Login process start ho raha hai...")
     try:
-        if os.path.exists(SESSION_FILE):
-            cl.load_settings(SESSION_FILE)
-            cl.login(USERNAME, PASSWORD)
-            print("✅ Purane Session se Login ho gaya!")
-        else:
-            cl.login(USERNAME, PASSWORD)
-            cl.dump_settings(SESSION_FILE)
-            print("✅ Naya Session ban gaya aur Login ho gaya!")
+        cl.login(USERNAME, PASSWORD)
+        print("✅ Login Success!")
     except Exception as e:
-        print(f"❌ Login Failed: {e}")
-        print("Agar 'Challenge Required' aa raha hai, toh Instagram app mein ja kar 'This was me' par click karein.")
+        print(f"❌ Login Error: {e}")
         return
 
-    print("🤖 Bot Active Hai! '.love' trigger ka wait kar raha hoon...")
+    # Jis message ko trigger banana hai
+    TRIGGER = ".love"
+    REPLY_TEXT = "❤️ Ye mera automated response hai! ❤️"
+
+    processed_messages = set() # Taaki ek hi message pe baar-baar reply na ho
 
     while True:
         try:
-            # Top 5 recent chats check karega
+            # Apne inbox ke top 5 threads uthao
             threads = cl.get_threads(amount=5)
             
             for thread in threads:
-                # Har thread ka sabse latest message nikalna
-                messages = cl.direct_messages(thread.id, amount=1)
-                if not messages:
-                    continue
+                # Thread ke andar ke messages check karo
+                messages = cl.direct_messages(thread.id, amount=3)
                 
-                last_msg = messages[0]
-
-                # LOGIC FIX: Agar message AAPNE bheja hai AUR text mein kahin bhi '.love' hai
-                if last_msg.user_id == cl.user_id and ".love" in last_msg.text.lower():
-                    print(f"Trigger detected in thread: {thread.id}")
-                    
-                    # Custom message send karna
-                    cl.direct_answer(thread.id, CUSTOM_REPLY)
-                    print(f"✅ Auto-reply bhej diya gaya hai!")
-                    
-                    # Extra wait taaki ek hi message par double reply na ho
-                    time.sleep(2)
+                for msg in messages:
+                    # Agar message ID pehle process nahi hui hai
+                    if msg.id not in processed_messages:
+                        
+                        # Check: Kya message AAPNE bheja hai aur usme '.love' hai?
+                        if msg.user_id == cl.user_id and TRIGGER in msg.text.lower():
+                            print(f"Match mil gaya! Thread: {thread.id}")
+                            
+                            # Reply bhejna
+                            cl.direct_answer(thread.id, REPLY_TEXT)
+                            print("✅ Reply sent!")
+                            
+                            # Is message ID ko 'done' list mein daal do
+                            processed_messages.add(msg.id)
             
-            # Agli baar check karne se pehle 15 seconds ka delay (Ban hone se bachne ke liye)
-            time.sleep(15)
-            
+            time.sleep(10) # 10 seconds wait
         except Exception as e:
-            print(f"⚠️ Polling Error: {e}")
-            time.sleep(30) # Error aane par 30 sec rukna taaki account safe rahe
+            print(f"Error: {e}")
+            time.sleep(20)
 
-# --- Execution Start Here ---
 if __name__ == "__main__":
-    # Flask ko alag thread mein chalana taaki bot ruk na jaye
-    t = threading.Thread(target=run_flask)
-    t.daemon = True
+    t = threading.Thread(target=lambda: app.run(host='0.0.0.0', port=os.environ.get("PORT", 8080)))
     t.start()
-    
-    # Bot ko start karna
     run_bot()
