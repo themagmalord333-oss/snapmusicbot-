@@ -1,95 +1,158 @@
 import os
 import time
-import json
+import threading
+import logging
 from pathlib import Path
 from flask import Flask, jsonify
 from instagrapi import Client
-from dotenv import load_dotenv
-import logging
 
-# Logging setup
-logging.basicConfig(level=logging.INFO)
+# 🔥 Detailed logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Load .env file (अगर है तो)
-load_dotenv()
-
 # Environment variables
-USERNAME = os.getenv('magmaxrich', 'magmaxrich')
-PASSWORD = os.getenv('9113380244', '9113380244')
-REPLY_MSG = os.getenv('REPLY_MESSAGE', 'धन्यवाद! 💖 आपके प्यार के लिए शुक्रिया!')
-PORT = int(os.getenv('PORT', 3000))
+USERNAME = os.environ.get('magmaxrich')
+PASSWORD = os.environ.get('9113380244')
+REPLY_MSG = os.environ.get('REPLY_MESSAGE', 'धन्यवाद! 💖')
+PORT = int(os.environ.get('PORT', 10000))
+
+# Session file path
+SESSION_FILE = Path(f"session_{USERNAME}.json")
 
 # Flask app
 app = Flask(__name__)
-
-# Session file
-SESSION_FILE = Path(f"session_{USERNAME}.json")
 
 class InstagramBot:
     def __init__(self):
         self.cl = Client()
         self.cl.delay_range = [1, 3]
-        self.running = True
+        self.logged_in = False
+        self.user_id = None
         
     def login(self):
         """Login with session"""
-        if SESSION_FILE.exists():
-            logger.info("📂 Loading session...")
-            self.cl.load_settings(SESSION_FILE)
-            self.cl.login(USERNAME, PASSWORD)
-        else:
-            logger.info("🔑 First time login...")
-            self.cl.login(USERNAME, PASSWORD)
-            self.cl.dump_settings(SESSION_FILE)
-        logger.info("✅ Login successful!")
-        return True
+        try:
+            # Try to load existing session
+            if SESSION_FILE.exists():
+                logger.info(f"📂 Loading session from {SESSION_FILE}")
+                self.cl.load_settings(SESSION_FILE)
+                self.cl.login(USERNAME, PASSWORD)
+                logger.info("✅ Session loaded successfully!")
+            else:
+                logger.info("🔑 No session found. First time login...")
+                self.cl.login(USERNAME, PASSWORD)
+                # Save session
+                self.cl.dump_settings(SESSION_FILE)
+                logger.info(f"✅ Login successful! Session saved to {SESSION_FILE}")
+            
+            self.logged_in = True
+            self.user_id = self.cl.user_id
+            logger.info(f"👤 Logged in as: {USERNAME} (ID: {self.user_id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Login failed: {e}")
+            return False
     
     def check_messages(self):
         """Check for .love messages"""
+        if not self.logged_in:
+            logger.warning("⚠️ Not logged in, skipping message check")
+            return
+        
         try:
+            logger.debug("Checking for new messages...")
             threads = self.cl.direct_threads(amount=5)
+            
             for thread in threads:
                 messages = self.cl.direct_messages(thread.id, amount=1)
+                
                 if messages:
                     msg = messages[0]
-                    # अगर .love है और खुद ने नहीं भेजा
-                    if (msg.text and msg.text.strip().lower() == '.love' 
-                        and msg.user_id != self.cl.user_id):
+                    logger.debug(f"Message from {msg.user_id}: {msg.text}")
+                    
+                    # Check if it's .love and not from self
+                    if (msg.text and 
+                        msg.text.strip().lower() == '.love' and 
+                        msg.user_id != self.user_id):
                         
-                        logger.info(f"💝 .love from {msg.user_id}")
-                        # Reply भेजो
+                        logger.info(f"💝 .love received from user {msg.user_id}!")
+                        
+                        # Send reply
                         self.cl.direct_send(REPLY_MSG, [msg.user_id])
-                        # Seen करो
+                        logger.info(f"✅ Reply sent: {REPLY_MSG}")
+                        
+                        # Mark as seen
                         self.cl.direct_thread_seen(thread.id, msg.id)
-                        logger.info("✅ Reply sent!")
                         
         except Exception as e:
-            logger.error(f"Error: {e}")
+            logger.error(f"Error checking messages: {e}")
     
     def run(self):
         """Main loop"""
-        self.login()
-        logger.info("👂 Listening for .love messages...")
+        logger.info("🤖 Bot starting...")
         
-        while self.running:
-            self.check_messages()
-            time.sleep(5)  # हर 5 सेकंड में check करो
+        if not self.login():
+            logger.error("❌ Could not login. Bot will retry in 60 seconds...")
+            time.sleep(60)
+            return
+        
+        logger.info("👂 Bot is now listening for .love messages...")
+        logger.info(f"📝 Reply message: {REPLY_MSG}")
+        
+        while True:
+            try:
+                self.check_messages()
+                time.sleep(5)  # Check every 5 seconds
+            except KeyboardInterrupt:
+                logger.info("👋 Bot stopped by user")
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}")
+                time.sleep(30)
 
-# Flask route for Render
+# Create bot instance
+bot = InstagramBot()
+
+# Flask routes
 @app.route('/')
 def home():
     return jsonify({
         'status': 'running',
-        'bot': 'Instagram 2-File Bot',
-        'user': USERNAME
+        'bot': 'Instagram Bot',
+        'user': USERNAME,
+        'logged_in': bot.logged_in,
+        'user_id': bot.user_id,
+        'session_file_exists': SESSION_FILE.exists()
     })
 
-# Start bot in background
-import threading
-bot = InstagramBot()
-threading.Thread(target=bot.run, daemon=True).start()
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy'}), 200
 
-# Run Flask
+@app.route('/debug')
+def debug():
+    """Debug endpoint to check bot status"""
+    return jsonify({
+        'username': USERNAME,
+        'logged_in': bot.logged_in,
+        'user_id': bot.user_id,
+        'session_file': str(SESSION_FILE),
+        'session_exists': SESSION_FILE.exists(),
+        'session_size': SESSION_FILE.stat().st_size if SESSION_FILE.exists() else 0
+    })
+
+# Start bot in background thread
+def start_bot():
+    bot.run()
+
+thread = threading.Thread(target=start_bot, daemon=True)
+thread.start()
+logger.info("🚀 Bot thread started")
+
+# Run Flask app
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT)
+    app.run(host='0.0.0.0', port=PORT, debug=False)
