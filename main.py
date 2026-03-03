@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 USERNAME = os.environ.get('magmaxrich')
 PASSWORD = os.environ.get('9113380244')
-SESSION_BASE64 = os.environ.get('52659413459%3A8GvKhj070iUqIQ%3A21%3AAYjEhhY2ZCJyKlZA-s937zNTRHtbNHqstCGhDG9dNQ')
+SESSION_BASE64 = os.environ.get('52659413459%3Ah6jvs5WzdCkNgM%3A17%3AAYirQNsCH8kMuZxBK_xM_HZywn25OW3HZRy_vmnjPA')
 PORT = int(os.environ.get('PORT', 10000))
 
 app = Flask(__name__)
