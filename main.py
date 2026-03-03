@@ -10,9 +10,9 @@ from instagrapi import Client
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-USERNAME = os.environ.get('magmaxrich')
-PASSWORD = os.environ.get('9113380244')
-SESSION_BASE64 = os.environ.get('52659413459%3Ah6jvs5WzdCkNgM%3A17%3AAYirQNsCH8kMuZxBK_xM_HZywn25OW3HZRy_vmnjPA')
+USERNAME = os.environ.get('frexxy_07')
+PASSWORD = os.environ.get('NAEEM ANSARI 922932')
+SESSION_BASE64 = os.environ.get('65538197022%3ARyjBpMsg5Yy2zu%3A3%3AAYgNQLW-aPrrZw8e MbPcrGPCi5t7a-pYFFNZbxuULA')
 PORT = int(os.environ.get('PORT', 10000))
 
 app = Flask(__name__)
