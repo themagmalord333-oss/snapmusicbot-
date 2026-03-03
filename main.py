@@ -13,7 +13,7 @@ def run_bot():
     global bot_status
     cl = Client()
     
-    USERNAME = "magmaxrich" # Apna username yahan dalein
+    USERNAME = "ghostcryper" # Apna username yahan dalein
     PASSWORD = "9113380244" # Apna password yahan dalein
     
     try:
