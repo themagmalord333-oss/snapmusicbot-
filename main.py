@@ -1,82 +1,77 @@
 import os
-import sys
 import time
 import threading
+from flask import Flask
+from instagrapi import Client
 import logging
-from flask import Flask, jsonify
-from instagrapi import Client  # 'instagramp' nahi, 'instagrapi' sahi spelling
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    stream=sys.stdout,
-    force=True
-)
+# Logging for Render Logs
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-print("\n" + "="*50)
-print("🤖 BOT STARTING")
-print("="*50 + "\n")
-
-# ✅ SAHI TARIQA - Environment variable KEYS use karo
-USERNAME = os.environ.get('IG_USERNAME')      # 'frexxy_07' nahi
-PASSWORD = os.environ.get('IG_PASSWORD')      # 'NAEEM ANSARI 922932' nahi
-PORT = int(os.environ.get('PORT', 10000))
-
-print(f"📱 Username from env: {USERNAME}")
-print(f"🔑 Password set: {'Yes' if PASSWORD else 'No'}")
-print(f"🌍 Port: {PORT}")
-
-if not USERNAME or not PASSWORD:
-    print("❌ CRITICAL: Username or password missing!")
-    print("👉 Render Dashboard mein Environment Variables set karo:")
-    print("   IG_USERNAME = frexxy_07")
-    print("   IG_PASSWORD = NAEEM ANSARI 922932")
-    sys.exit(1)
 
 app = Flask(__name__)
 
-class InstagramBot:
-    def __init__(self):
-        self.cl = Client()
-        self.logged_in = False
-        self.user_id = None
-        
-    def login(self):
-        try:
-            print(f"🔑 Logging in as {USERNAME}...")
-            self.cl.login(USERNAME, PASSWORD)
-            self.logged_in = True
-            self.user_id = self.cl.user_id
-            print(f"✅ Login successful! User ID: {self.user_id}")
-            return True
-        except Exception as e:
-            print(f"❌ Login failed: {e}")
-            return False
-    
-    def run(self):
-        if self.login():
-            print("👂 Bot is running...")
-            while True:
-                time.sleep(10)
-
-bot = InstagramBot()
-
-def start_bot():
-    bot.run()
-
-thread = threading.Thread(target=start_bot, daemon=True)
-thread.start()
-
 @app.route('/')
 def home():
-    return jsonify({
-        'status': 'running',
-        'user': USERNAME,
-        'logged_in': bot.logged_in,
-        'user_id': bot.user_id,
-        'thread_alive': thread.is_alive()
-    })
+    return "Bot is Active!"
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT)
+def run_bot():
+    cl = Client()
+    
+    # 📱 Real Android Device jaisa dikhne ke liye User-Agent
+    cl.set_user_agent("Instagram 219.0.0.12.117 Android (29/10; 480dpi; 1080x2202; Xiaomi; Redmi Note 9 Pro; joyeuse; qcom; en_US; 340011804)")
+
+    USERNAME = "frexxy_07" # Aapki ID
+    PASSWORD = "NAEEM ANSARI 922932" # Apna sahi password yahan dalein
+    SESSION_FILE = "session_insta.json"
+
+    # --- Login Logic ---
+    try:
+        if os.path.exists(SESSION_FILE):
+            cl.load_settings(SESSION_FILE)
+            logger.info("Session file mil gayi, login kar raha hoon...")
+        
+        cl.login(USERNAME, PASSWORD)
+        cl.dump_settings(SESSION_FILE) # Naya session save karein
+        logger.info(f"✅ LOGIN SUCCESS: {cl.user_id}")
+    except Exception as e:
+        logger.error(f"❌ LOGIN FAILED: {e}")
+        return
+
+    TRIGGER = ".love"
+    REPLY_TEXT = "❤️ Ye mera automated message hai! Swagat hai. ❤️"
+    processed_ids = set()
+
+    logger.info("🤖 Bot monitoring started...")
+
+    while True:
+        try:
+            # Apne inbox ke messages fetch karein
+            messages = cl.direct_messages(amount=10)
+            
+            for msg in messages:
+                if msg.id not in processed_ids:
+                    # Logic: Agar message AAPNE bheja hai aur TRIGGER word hai
+                    if msg.user_id == cl.user_id and TRIGGER in msg.text.lower():
+                        logger.info(f"🎯 Trigger detected in Thread: {msg.thread_id}")
+                        
+                        # Automated Reply
+                        cl.direct_answer(msg.thread_id, REPLY_TEXT)
+                        logger.info("✅ Reply sent!")
+                        
+                        processed_ids.add(msg.id)
+            
+            # 15 seconds ka gap (Safety ke liye)
+            time.sleep(15)
+            
+        except Exception as e:
+            logger.error(f"⚠️ Loop Error: {e}")
+            time.sleep(30)
+
+if __name__ == "__main__":
+    # Render ke liye Flask thread
+    port = int(os.environ.get("PORT", 8080))
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port)).start()
+    
+    # Bot start karein
+    run_bot()
