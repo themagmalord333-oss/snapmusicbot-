@@ -13,8 +13,8 @@ def run_bot():
     global bot_status
     cl = Client()
     
-    USERNAME = "frexxy_07" # Apna username yahan dalein
-    PASSWORD = "NAEEM ANSARI 922932" # Apna password yahan dalein
+    USERNAME = "magmaxrich" # Apna username yahan dalein
+    PASSWORD = "9113380244" # Apna password yahan dalein
     
     try:
         bot_status = "🔄 Login karne ki koshish kar raha hoon..."
