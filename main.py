@@ -3,75 +3,74 @@ import time
 import threading
 from flask import Flask
 from instagrapi import Client
-import logging
-
-# Logging for Render Logs
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot is Active!"
+# Ye variable humein screen par status dikhayega
+bot_status = "⏳ Bot start ho raha hai..."
 
 def run_bot():
+    global bot_status
     cl = Client()
     
-    # 📱 Real Android Device jaisa dikhne ke liye User-Agent
-    cl.set_user_agent("Instagram 219.0.0.12.117 Android (29/10; 480dpi; 1080x2202; Xiaomi; Redmi Note 9 Pro; joyeuse; qcom; en_US; 340011804)")
-
-    USERNAME = "frexxy_07" # Aapki ID
-    PASSWORD = "NAEEM ANSARI 922932" # Apna sahi password yahan dalein
-    SESSION_FILE = "session_insta.json"
-
-    # --- Login Logic ---
+    USERNAME = "frexxy_07" # Apna username yahan dalein
+    PASSWORD = "NAEEM ANSARI 922932" # Apna password yahan dalein
+    
     try:
-        if os.path.exists(SESSION_FILE):
-            cl.load_settings(SESSION_FILE)
-            logger.info("Session file mil gayi, login kar raha hoon...")
+        bot_status = "🔄 Login karne ki koshish kar raha hoon..."
+        print(bot_status)
+        
+        # Phone jaisa dikhne ke liye
+        cl.set_user_agent("Instagram 219.0.0.12.117 Android (29/10; 480dpi; 1080x2202; Xiaomi; Redmi Note 9 Pro; joyeuse; qcom; en_US; 340011804)")
         
         cl.login(USERNAME, PASSWORD)
-        cl.dump_settings(SESSION_FILE) # Naya session save karein
-        logger.info(f"✅ LOGIN SUCCESS: {cl.user_id}")
+        bot_status = f"✅ LOGIN SUCCESS! Bot chal gaya (ID: {cl.user_id})"
+        print(bot_status)
+        
     except Exception as e:
-        logger.error(f"❌ LOGIN FAILED: {e}")
+        # Error ko pakad kar screen par dikhana
+        bot_status = f"❌ LOGIN FAILED: {str(e)}. Instagram ne block kiya hai."
+        print(bot_status)
         return
 
     TRIGGER = ".love"
-    REPLY_TEXT = "❤️ Ye mera automated message hai! Swagat hai. ❤️"
+    REPLY_TEXT = "❤️ Ye mera automated message hai! ❤️"
     processed_ids = set()
-
-    logger.info("🤖 Bot monitoring started...")
 
     while True:
         try:
-            # Apne inbox ke messages fetch karein
-            messages = cl.direct_messages(amount=10)
+            bot_status = "🟢 Bot Active hai aur '.love' ka wait kar raha hai!"
+            messages = cl.direct_messages(amount=5)
             
             for msg in messages:
                 if msg.id not in processed_ids:
-                    # Logic: Agar message AAPNE bheja hai aur TRIGGER word hai
                     if msg.user_id == cl.user_id and TRIGGER in msg.text.lower():
-                        logger.info(f"🎯 Trigger detected in Thread: {msg.thread_id}")
-                        
-                        # Automated Reply
                         cl.direct_answer(msg.thread_id, REPLY_TEXT)
-                        logger.info("✅ Reply sent!")
-                        
                         processed_ids.add(msg.id)
             
-            # 15 seconds ka gap (Safety ke liye)
-            time.sleep(15)
-            
+            time.sleep(10)
         except Exception as e:
-            logger.error(f"⚠️ Loop Error: {e}")
-            time.sleep(30)
+            bot_status = f"⚠️ Loop mein error: {str(e)}"
+            time.sleep(20)
+
+@app.route('/')
+def home():
+    # Render ke URL par status dikhega
+    return f"""
+    <html>
+        <body style="font-family: Arial; padding: 20px; background-color: #222; color: #fff;">
+            <h2>Instagram Bot Status:</h2>
+            <p style="font-size: 18px; padding: 15px; background: #333; border-radius: 8px;">{bot_status}</p>
+            <p>Isko refresh karte raho status check karne ke liye.</p>
+        </body>
+    </html>
+    """
 
 if __name__ == "__main__":
-    # Render ke liye Flask thread
-    port = int(os.environ.get("PORT", 8080))
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port)).start()
+    # Bot ko background mein chalana
+    t = threading.Thread(target=run_bot)
+    t.start()
     
-    # Bot start karein
-    run_bot()
+    # Web server chalana
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
