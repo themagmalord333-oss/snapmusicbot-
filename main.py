@@ -1,76 +1,58 @@
 import os
-import time
+import json
 import threading
 from flask import Flask
 from instagrapi import Client
 
 app = Flask(__name__)
 
-# Ye variable humein screen par status dikhayega
-bot_status = "⏳ Bot start ho raha hai..."
+# Web page par dikhane ke liye variable
+session_result = "⏳ Session ban raha hai... Thoda wait karein aur page ko 30 second baad refresh karein."
 
-def run_bot():
-    global bot_status
+def generate_session():
+    global session_result
     cl = Client()
     
-    USERNAME = "mag99mag99mag99" # Apna username yahan dalein
-    PASSWORD = "9113380244" # Apna password yahan dalein
+    # ⚠️ APNI DETAILS YAHAN DAALEIN
+    USERNAME = "mag99mag99mag99"
+    PASSWORD = "9113380244"
     
     try:
-        bot_status = "🔄 Login karne ki koshish kar raha hoon..."
-        print(bot_status)
-        
-        # Phone jaisa dikhne ke liye
+        print("Login attempt start...")
         cl.set_user_agent("Instagram 219.0.0.12.117 Android (29/10; 480dpi; 1080x2202; Xiaomi; Redmi Note 9 Pro; joyeuse; qcom; en_US; 340011804)")
         
         cl.login(USERNAME, PASSWORD)
-        bot_status = f"✅ LOGIN SUCCESS! Bot chal gaya (ID: {cl.user_id})"
-        print(bot_status)
+        
+        # Session ka data nikalna
+        session_data = cl.get_settings()
+        
+        # Data ko sundar JSON format mein badalna
+        session_result = json.dumps(session_data, indent=4)
+        print("✅ Session ban gaya!")
         
     except Exception as e:
-        # Error ko pakad kar screen par dikhana
-        bot_status = f"❌ LOGIN FAILED: {str(e)}. Instagram ne block kiya hai."
-        print(bot_status)
-        return
-
-    TRIGGER = ".love"
-    REPLY_TEXT = "❤️ Ye mera automated message hai! ❤️"
-    processed_ids = set()
-
-    while True:
-        try:
-            bot_status = "🟢 Bot Active hai aur '.love' ka wait kar raha hai!"
-            messages = cl.direct_messages(amount=5)
-            
-            for msg in messages:
-                if msg.id not in processed_ids:
-                    if msg.user_id == cl.user_id and TRIGGER in msg.text.lower():
-                        cl.direct_answer(msg.thread_id, REPLY_TEXT)
-                        processed_ids.add(msg.id)
-            
-            time.sleep(10)
-        except Exception as e:
-            bot_status = f"⚠️ Loop mein error: {str(e)}"
-            time.sleep(20)
+        # Agar block hua toh error screen par dikhega
+        session_result = f"❌ ERROR AA GAYA:\n\n{str(e)}\n\n(Bhai, Render ka IP sach mein block hai. Humein kisi dusri jagah se session banana padega.)"
+        print("❌ Login Failed.")
 
 @app.route('/')
 def home():
-    # Render ke URL par status dikhega
+    # Web page ka design jo aapko data dikhayega
     return f"""
     <html>
-        <body style="font-family: Arial; padding: 20px; background-color: #222; color: #fff;">
-            <h2>Instagram Bot Status:</h2>
-            <p style="font-size: 18px; padding: 15px; background: #333; border-radius: 8px;">{bot_status}</p>
-            <p>Isko refresh karte raho status check karne ke liye.</p>
+        <body style="font-family: monospace; background-color: #121212; color: #00ff00; padding: 20px;">
+            <h2>Instagram Session Data:</h2>
+            <pre style="background: #000; padding: 15px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">{session_result}</pre>
+            <p style="color: white; font-family: Arial;"><b>Instruction:</b> Agar upar bohot saara code (JSON) aa gaya hai, toh us pure text ko copy karo aur apne GitHub mein 'session_insta.json' naam ki file banakar paste kar do.</p>
         </body>
     </html>
     """
 
 if __name__ == "__main__":
-    # Bot ko background mein chalana
-    t = threading.Thread(target=run_bot)
+    # Background mein login process chalana
+    t = threading.Thread(target=generate_session)
     t.start()
     
-    # Web server chalana
+    # Render ka web server on karna
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
